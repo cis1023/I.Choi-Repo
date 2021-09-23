@@ -1,0 +1,301 @@
+
+library(tidyverse)
+library(ggplot2)
+library(sf)
+library(sp)
+
+
+install.packages("cdlTools")
+library(cdlTools)
+
+
+
+p.counties <- "./data/CBW/County_Boundaries.shp"
+p.stations <- "./data/CBW/Non-Tidal_Water_Quality_Monitoring_Stations_in_the_Chesapeake_Bay.shp" 
+
+d.counties <- sf::read_sf(p.counties)
+d.stations <- sf::read_sf(p.stations)
+
+# TASK 1: Basic data manipulation
+
+   # 1.1 For each county, 
+   # Land Area as percentage of the total area (land + water) for tha state
+
+
+Landpercent.counties <- d.counties %>% 
+  as_tibble() %>% dplyr::select(-geometry) %>% 
+  group_by(STATEFP10) %>%
+  subset(select=c(STATEFP10, NAME10, ALAND10, AWATER10)) %>%
+  mutate(TotalArea=ALAND10+AWATER10,
+         PERCENT.total.1 = (ALAND10)/sum(TotalArea)) 
+   # PERCENT: Total is 1.00
+Landpercent.counties[c("NAME10", "PERCENT.total.1")] %>% print(n=Inf)  
+
+# view(Landpercent.counties)
+
+
+   # 1.2 For each state, counties largest rate of water area
+
+LaWaCo <- d.counties %>%
+  as_tibble() %>% 
+  dplyr::select(-geometry) %>%
+  group_by(STATEFP10) %>%
+  subset(select=c(STATEFP10, NAME10, ALAND10, AWATER10)) %>%
+  mutate(TotalArea=ALAND10+AWATER10,
+         WATERPERCENT = (AWATER10)/(ALAND10+AWATER10),
+         STATE=fips(STATEFP10, to='abbreviation'),
+         COUNTY=NAME10) %>% slice(which.max(WATERPERCENT))
+LaWaCo[c("STATE", "COUNTY")] 
+
+   # 1.3 Number of county
+
+LISTCO <- d.counties %>%
+  as_tibble() %>% 
+  dplyr::select(-geometry) %>%
+  group_by(STATEFP10) %>% 
+  summarise(n = n()) %>% 
+  mutate(STATE=fips(STATEFP10, to='abbreviation'), NUMBER_OF_COUNTY=n)
+LISTCO[c("STATE", "NUMBER_OF_COUNTY")]
+
+   # 1.4 Shortest Name
+ 
+StName <- d.stations  %>%
+  as_tibble() %>% 
+  dplyr::select(-geometry) %>%
+  subset(select=STATION_NA) %>%
+  mutate(NofCh=nchar(STATION_NA))
+StName[which.min(StName$NofCh),]
+
+
+# Task 2: Plotting attribute data
+
+   # 2.1 Scatterplot
+
+d.counties %>% 
+  ggplot(aes(x=ALAND10, y=AWATER10))  +
+  geom_point(aes(color=fips(STATEFP10, to='abbreviation')), size=2) +
+  theme_minimal() +
+  scale_color_discrete(name="STATE") +
+  labs(x = "Land Area", y="Water Area",
+       title = "Relationship between Land Area and Water Area for each county")
+
+# To find relation (trend) by state, it seems to need plotting "geom_smooth" by state
+d.counties %>% 
+  ggplot(aes(x=ALAND10, y=AWATER10))  +
+  geom_point(aes(color=fips(STATEFP10, to='abbreviation')), size=2) +
+  geom_smooth(aes(color=fips(STATEFP10, to='abbreviation')), method="glm", se=F)  +
+  theme_minimal() +
+  scale_color_discrete(name="STATE") +
+  labs(x = "Land Area", y="Water Area",
+       title = "Relationship between Land Area and Water Area for each county")
+
+
+
+   # 2.2 Histogram of drainage
+   # bins setting = 7 (Apply general rule "2^K>N", 2^K>122, K=7)
+
+d.stations %>% ggplot(aes(Drainage_A)) +
+  geom_histogram(bins = 7)  +
+  theme_minimal() + 
+  labs(x="Drainage area", y="Number of Station", 
+       title = "Drainage area for all monitoring stations")
+
+
+   # 2.3 Histogram of drainage w/ State variables
+
+sf::st_intersection(d.stations, d.counties) # Error
+sf::st_is_valid(d.counties) # check error in [206]
+dd.counties <- sf::st_make_valid(d.counties) # correct the error 
+sf::st_is_valid(dd.counties) # confirm the correction
+
+
+# bins setting = 7 (Apply general rule "2^K>N", 2^K>122, K=7)
+dd.counties <- sf::st_make_valid(d.counties)
+StateStation <- sf::st_intersection(d.stations, dd.counties)
+StateStation %>% ggplot(aes(Drainage_A)) +
+  geom_histogram(aes(fill=fips(STATEFP10, to='abbreviation')), bins = 7) +
+  theme_minimal() +
+  labs(y="Number of Station", fill="STATE",
+       title = "Drainage area for all monitoring stations using state variable")
+
+# Task 3: 
+
+  i <- 0
+numbers.test <- function(mynumber.list) 
+{repeat {i <- i + 1 
+if(i == length(mynumber.list)) break (i <- i + 1)}
+  {if(is.numeric(mynumber.list)) 
+  {cat("mean=", mean(mynumber.list), "median=",median(mynumber.list),
+       "max=", max(mynumber.list), "min=", min(mynumber.list),"\n")
+   cat("Ascending:", sort(mynumber.list), "\n", 
+        "Descending:", sort(mynumber.list, decreasing = TRUE),"\n")} 
+  else {cat("Error")}}}
+
+mynumber.list <- c (1,0,-1)
+numbers.test(mynumber.list)
+
+mynumber.list <- c (10,100,1000)
+numbers.test(mynumber.list)
+
+mynumber.list <- c (.1, .001, 1e8)
+numbers.test(mynumber.list)
+
+mynumber.list <- c ("a","b","c")
+numbers.test(mynumber.list)
+
+
+
+# Task 4: (slightly) more complex spatial analysis
+
+   # 4.1 Number of monitoring stations in each state.
+
+dd.counties <- sf::st_make_valid(d.counties)
+
+EachStateStation <- sf::st_intersection(d.stations, dd.counties) %>%
+  as_tibble() %>% 
+  dplyr::select(-geometry) %>%
+  group_by(STATEFP10) %>%
+  subset(select=c(STATEFP10, STATION_NA)) %>%
+  summarise(n = n()) %>%
+  mutate(STATE=fips(STATEFP10, to='abbreviation'), Number_of_Station=n)
+EachStateStation[c("STATE", "Number_of_Station")]
+
+
+   # 4.2 Average size of counties in New York
+
+NY.counties <- dd.counties %>%
+  as_tibble() %>% 
+  dplyr::select(-geometry) %>%
+  dplyr::filter(STATEFP10==fips('New York')) %>% 
+  subset(select=c(ALAND10, AWATER10)) %>%
+  mutate(TotalArea=ALAND10+AWATER10)
+summarise(NY.counties, Average_size_of_NY_Counties=mean(TotalArea))
+
+
+   # 4.3 State having stations   
+   #     with the greatest average drainage area (Drainage_A)
+
+dd.counties <- sf::st_make_valid(d.counties)
+
+GreatStateStation <- sf::st_intersection(d.stations, dd.counties) %>%
+  as_tibble() %>% 
+  dplyr::select(-geometry) %>%
+  group_by(STATEFP10) %>%
+  subset(select=c(STATEFP10, STATION_NA, Drainage_A)) %>%
+  summarise(Aver.Drainage = mean(Drainage_A)) %>% 
+  mutate(STATE=fips(STATEFP10, to='abbreviation'))
+slice(GreatStateStation, which.max(Aver.Drainage)) %>%
+  summarise(State_having_stations_with_the_greatest_average_drainage_area = STATE,
+            Average.drainage.area=c(Aver.Drainage))
+           
+    
+# Thanks a lot !!!!
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  
+
+
+  
+  
+  
+  
+
+  
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+  
+    
+    
+
+  
+  
+  
+  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
