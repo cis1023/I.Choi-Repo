@@ -19,7 +19,7 @@ d.stations <- sf::read_sf(p.stations)
 # TASK 1: Basic data manipulation
 
    # 1.1 For each county, 
-   # Land Area as percentage of the total area (land + water) for tha state
+   # Land Area as percentage of the total area (land + water) for that state
 
 
 Landpercent.counties <- d.counties %>% 
